@@ -1,0 +1,12 @@
+# Raw game exports (36 MB). Not needed to run the app: data/dataset.json is built from them (tools/make_dataset.ps1).
+dumps/
+
+# Individual textures. icons/textures.js contains all of them in one file, which is what the app loads.
+icons/tex/
+
+# Built on your own PC with tools/build_exe.ps1 (a downloaded .exe triggers Windows SmartScreen warnings)
+GTPlanner.exe
+tools/GTPlanner.ico
+
+*.log
+Thumbs.db

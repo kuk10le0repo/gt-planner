@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>building...</title>
+<!-- Used by tools/make_dataset.ps1 (headless Edge). Converts dumps/*.json with the app's own converter and prints one dataset JSON. -->
+<pre id="out">pending</pre>
+<script src="../convert.js"></script>
+<script>
+(async () => {
+  const out = document.getElementById("out");
+  const pretty = id => String(id).split(":").pop().replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  try {
+    const q = new URLSearchParams(location.search);
+    const raw = await (await fetch("../dumps/gt_planner_dump.json")).json();
+    const d = window.convertKubeDump(raw);
+    delete d._skipped; delete d._fluidTagsMapped;
+
+    const mbs = {};
+    try {
+      const m = await (await fetch("../dumps/gt_planner_multiblocks.json")).json();
+      (m.multiblocks || []).forEach(x => {
+        if (x.blocks && Object.keys(x.blocks).length)
+          mbs[x.id] = { name: (x.name && x.name !== "null" && x.name !== x.id) ? x.name : pretty(x.id), blocks: x.blocks, dims: x.dims, types: x.types || [] };
+      });
+    } catch (e) { /* multiblocks are optional */ }
+    d.multiblocks = mbs;
+    d.version = q.get("v") || "dev";
+    d.name = q.get("name") || d.name;
+    out.textContent = JSON.stringify(d);
+    document.title = "done:" + d.recipes.length + ":" + Object.keys(mbs).length;
+  } catch (e) {
+    out.textContent = "ERROR " + e;
+    document.title = "error";
+  }
+})();
+</script>

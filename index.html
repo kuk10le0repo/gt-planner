@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GT Planner</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2314161a'/%3E%3Cpath d='M16 20h14c8 0 6 24 16 24M16 44h14c8 0 6-24 16-24' stroke='%234da3ff' stroke-width='4' fill='none'/%3E%3Crect x='8' y='14' width='14' height='12' rx='3' fill='%234cc38a'/%3E%3Crect x='8' y='38' width='14' height='12' rx='3' fill='%234cc38a'/%3E%3Crect x='42' y='26' width='14' height='12' rx='3' fill='%23ffb454'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <b class="logo">GT Planner</b>
+  <span id="dataName" class="muted"></span>
+  <span class="spacer"></span>
+  <button id="btnUnit" title="Toggle rate unit">per min</button>
+  <button id="btnAuto" title="Build the whole production chain for an item automatically">&#9881; Auto-build</button>
+  <button id="btnNote" title="Add a sticky note">+ Note</button>
+  <button id="btnFrame" title="Add a group frame (moves the nodes inside it)">+ Frame</button>
+  <button id="btnUndo" title="Undo (Ctrl+Z)" disabled>&#8630; Undo</button>
+  <button id="btnRedo" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" disabled>&#8631; Redo</button>
+  <button id="btnFit">Fit view</button>
+  <button id="btnDemo">Load demo</button>
+  <button id="btnPng" title="Save this page as a PNG image (Shift+click copies it to the clipboard)">Export PNG</button>
+  <button id="btnExport">Export board</button>
+  <button id="btnImport">Import board</button>
+  <button id="btnKube" title="Import the dump written by the KubeJS script">Import KubeJS dump</button>
+  <button id="btnData" title="Load a recipe dataset JSON">Load data</button>
+  <button id="btnClear">Clear</button>
+  <input type="file" id="fileBoard" accept=".json" hidden>
+  <input type="file" id="fileData" accept=".json" hidden>
+  <input type="file" id="fileKube" accept=".json" hidden>
+</header>
+<main>
+  <aside id="left">
+    <input id="search" placeholder="Search recipe, item or machine..." autocomplete="off">
+    <div id="recipeList"></div>
+  </aside>
+  <section id="canvas">
+    <div id="tabs"></div>
+    <div id="world">
+      <div id="frames"></div>
+      <svg id="wires"></svg>
+      <div id="nodes"></div>
+      <div id="notes"></div>
+    </div>
+    <div id="hint">Drag background to pan, wheel to zoom. Click an output dot, then an input dot of the same item to wire. Del removes the selection.</div>
+  </section>
+  <aside id="right"><div id="summary"></div></aside>
+</main>
+<div id="dlg" class="dlg hidden">
+  <div class="dlgbox">
+    <h2 id="dlgTitle">Auto-build a chain</h2>
+    <label class="lbl">Target item</label>
+    <input id="dlgItem" placeholder="Search an item or fluid that some recipe produces..." autocomplete="off">
+    <div id="dlgResults"></div>
+    <div class="dlgrow"><label class="lbl">Rate</label><input id="dlgRate" type="number" min="0" step="any" value="1"><span id="dlgUnit" class="muted"></span></div>
+    <fieldset>
+      <legend>Stop at these (treat as raw materials)</legend>
+      <label><input type="checkbox" id="rawIngots" checked> Ingots &amp; gems</label>
+      <label><input type="checkbox" id="rawOres" checked> Ores</label>
+      <label><input type="checkbox" id="rawOther" checked> Vanilla &amp; other-mod items</label>
+      <label><input type="checkbox" id="rawFluids" checked> Fluids</label>
+      <label><input type="checkbox" id="rawDusts"> Dusts</label>
+    </fieldset>
+    <div class="dlgrow"><label class="lbl">Max depth</label><input id="dlgDepth" type="number" min="1" max="15" value="8"><label class="lbl">Max nodes</label><input id="dlgMax" type="number" min="1" max="120" value="40"></div>
+    <div id="dlgNote" class="muted"></div>
+    <div class="dlgbtns"><button id="dlgCancel">Cancel</button><button id="dlgBuild" class="primary">Build chain</button></div>
+  </div>
+</div>
+<div id="toast"></div>
+<script src="data.js"></script>
+<script src="convert.js"></script>
+<script src="icons/index.js" onerror="console.info('no icons/index.js yet')"></script>
+<script src="icons/textures.js" onerror="console.info('no icons/textures.js: falling back to icons/tex/*.png')"></script>
+<script src="app.js"></script>
+</body>
+</html>
