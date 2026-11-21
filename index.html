@@ -32,8 +32,17 @@
 </header>
 <main>
   <aside id="left">
-    <input id="search" placeholder="Search recipe, item or machine..." autocomplete="off">
+    <input id="search" placeholder="Search an item or machine..." autocomplete="off">
+    <div class="seg" id="searchMode" title="What to search in">
+      <button data-m="all" class="on" title="Match the item names (made or used) and the machine">All</button>
+      <button data-m="out" title="Recipes that MAKE this item">Makes</button>
+      <button data-m="in" title="Recipes that USE this item as an ingredient">Uses</button>
+      <button data-m="machine" title="Search by machine name">Machine</button>
+    </div>
+    <select id="machineFilter" title="Only show recipes for one machine"><option value="">Any machine</option></select>
+    <div id="searchInfo" class="muted"></div>
     <div id="recipeList"></div>
+    <div id="leftResize" title="Drag to resize this panel"></div>
   </aside>
   <section id="canvas">
     <div id="tabs"></div>

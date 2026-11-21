@@ -107,6 +107,7 @@ function setData(d) {
   (d.recipes || []).forEach(r => REC[r.id] = r);
   refreshCoils();
   $("#dataName").textContent = d.name || "Custom data";
+  SRCH.clear(); populateMachineFilter(); syncSearchUi();
   renderList();
 }
 const itemName = id => (DATA.items && DATA.items[id] && DATA.items[id].name) || id;
@@ -455,25 +456,81 @@ function connect(a, ai, b, bi) {
 }
 
 // ---------- rendering ----------
+// ---- recipe search: choose WHAT you search (what it makes / what it uses / the machine / everything) ----
+let searchMode = "all", machineFilter = "", searchLimit = 200;
+const SRCH = new Map();                                    // recipe id -> lowercase names per field (derived, never saved)
+try {
+  const s = JSON.parse(localStorage.getItem("gtp.search") || "{}");
+  if (["all", "out", "in", "machine"].includes(s.mode)) searchMode = s.mode;      // only the mode is remembered; the machine filter starts empty each time
+} catch (_) {}
+const SEARCH_HINT = { all: "Search an item or machine...", out: "Recipes that MAKE...", in: "Recipes that USE...", machine: "Machine name..." };
+const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function srch(r) {
+  let s = SRCH.get(r.id);
+  if (!s) { s = { o: r.outputs.map(x => itemName(x.item).toLowerCase()), i: r.inputs.map(x => itemName(x.item).toLowerCase()), m: machineName(r.machine).toLowerCase() }; SRCH.set(r.id, s); }
+  return s;
+}
+function populateMachineFilter() {                         // one option per machine type, with its recipe count
+  const counts = {}; (DATA.recipes || []).forEach(r => { counts[r.machine] = (counts[r.machine] || 0) + 1; });
+  const ids = Object.keys(counts).sort((a, b) => machineName(a).localeCompare(machineName(b)));
+  if (!counts[machineFilter]) machineFilter = "";
+  $("#machineFilter").innerHTML = `<option value="">Any machine</option>` + ids.map(m => `<option value="${esc(m)}"${m === machineFilter ? " selected" : ""}>${esc(machineName(m))} (${counts[m].toLocaleString()})</option>`).join("");
+}
+function syncSearchUi() {
+  document.querySelectorAll("#searchMode button").forEach(b => b.classList.toggle("on", b.dataset.m === searchMode));
+  $("#search").placeholder = SEARCH_HINT[searchMode];
+}
 function renderList() {
-  const q = $("#search").value.trim().toLowerCase();
-  const score = r => {
-    const o = r.outputs.map(x => itemName(x.item).toLowerCase());
-    if (o.some(n => n === q)) return 0;
-    if (o.some(n => n.startsWith(q))) return 1;
-    if (o.some(n => n.includes(q))) return 2;
-    return 3;
+  const q = $("#search").value.trim().toLowerCase(), tokens = q.split(/\s+/).filter(Boolean), mode = searchMode;
+  const matchers = {
+    out: s => tokens.every(t => s.o.some(n => n.includes(t))),
+    in: s => tokens.every(t => s.i.some(n => n.includes(t))),
+    machine: s => tokens.every(t => s.m.includes(t)),
+    all: s => tokens.every(t => s.m.includes(t) || s.o.some(n => n.includes(t)) || s.i.some(n => n.includes(t)))
   };
-  let rs = (DATA.recipes || []).filter(r => {
-    if (!q) return true;
-    const hay = [machineName(r.machine), ...r.inputs.map(i => itemName(i.item)), ...r.outputs.map(o => itemName(o.item))].join(" ").toLowerCase();
-    return q.split(/\s+/).every(t => hay.includes(t));
-  });
-  if (q) rs = rs.map(r => [score(r), r]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
-  rs = rs.slice(0, 200);
-  $("#recipeList").innerHTML = rs.map(r =>
-    `<div class="rec" data-rid="${esc(r.id)}">${iconHtml(r.outputs[0].item)}<div class="t"><div>${esc(recipeName(r))}</div><div class="m">${esc(machineName(r.machine))} · ${TIERS[baseTier(r)]} · ${r.inputs.map(i => esc(itemName(i.item))).join(", ")}</div></div><button>+</button></div>`).join("")
-    || `<div class="muted" style="padding:10px">No matches.</div>`;
+  const rank = (names, phrase) => {                        // exact < prefix < contains; the FIRST (main) item beats a byproduct
+    let best = 3;
+    names.forEach((n, i) => { const v = n === phrase ? 0 : n.startsWith(phrase) ? 1 : n.includes(phrase) ? 2 : 3; if (v < 3) best = Math.min(best, v + (i ? 0.4 : 0)); });
+    return best;
+  };
+  const score = s => {                                     // lower = better; the field you are searching ranks first
+    if (!q) return 0;
+    if (mode === "machine") return rank([s.m], q);
+    if (mode === "in") return rank(s.i, q);
+    const a = rank(s.o, q);
+    if (mode === "out" || a < 3) return a;
+    return Math.min(3.5 + rank(s.i, q) * 0.1, 3.8);        // "all": outputs first, then inputs, then machine / spread-out words
+  };
+  let rs = [];
+  for (const r of DATA.recipes || []) {
+    if (machineFilter && r.machine !== machineFilter) continue;
+    const s = srch(r);
+    if (tokens.length && !matchers[mode](s)) continue;
+    rs.push(r);
+  }
+  if (q || machineFilter) {
+    const sc = new Map(rs.map(r => [r, score(srch(r))]));
+    rs.sort((a, b) => (sc.get(a) - sc.get(b)) || (a.inputs.length - b.inputs.length) || srch(a).o[0].localeCompare(srch(b).o[0]));
+  }
+  const total = rs.length, shown = rs.slice(0, searchLimit);
+
+  const tokRe = tokens.length ? new RegExp(tokens.map(escRe).join("|"), "gi") : null;
+  const hl = (text, on) => {                               // wrap the searched words in <mark>
+    if (!on || !tokRe) return esc(text);
+    let out = "", last = 0; tokRe.lastIndex = 0;
+    text.replace(tokRe, (m, idx) => { out += esc(text.slice(last, idx)) + "<mark>" + esc(m) + "</mark>"; last = idx + m.length; return m; });
+    return out + esc(text.slice(last));
+  };
+  const part = (x, on) => (isFluid(x.item) ? fmt(x.amount) + " mB " : x.amount > 1 ? x.amount + "× " : "") + hl(itemName(x.item), on);
+  const hOut = mode === "all" || mode === "out", hIn = mode === "all" || mode === "in", hMach = mode === "all" || mode === "machine";
+  $("#recipeList").innerHTML = shown.map(r =>
+    `<div class="rec" data-rid="${esc(r.id)}">${iconHtml(r.outputs[0].item)}<div class="t">` +
+    `<div class="o">${r.outputs.map(o => part(o, hOut)).join(" + ")}</div>` +
+    `<div class="i">← ${r.inputs.length ? r.inputs.map(i => part(i, hIn)).join(" + ") : "(no input)"}</div>` +
+    `<div class="m">${hl(machineName(r.machine), hMach)} · ${TIERS[baseTier(r)]}</div></div><button title="Add to the board">+</button></div>`).join("")
+    + (total > shown.length ? `<button id="moreBtn" class="more">Show ${Math.min(200, total - shown.length)} more of ${(total - shown.length).toLocaleString()} remaining</button>` : "")
+    || `<div class="muted" style="padding:10px">No recipes match. Try another search mode.</div>`;
+  $("#searchInfo").textContent = !q && !machineFilter ? `${total.toLocaleString()} recipes · type to search` : `${total.toLocaleString()} matching recipe${total === 1 ? "" : "s"}${total > shown.length ? ", showing the first " + shown.length : ""}`;
   hydrateIcons($("#recipeList"));
 }
 
@@ -850,8 +907,30 @@ window.addEventListener("keydown", e => {
   }
 });
 
-$("#recipeList").addEventListener("click", e => { const r = e.target.closest(".rec"); if (r) addNode(r.dataset.rid); });
-$("#search").addEventListener("input", renderList);
+$("#recipeList").addEventListener("click", e => {
+  if (e.target.closest("#moreBtn")) { const top = $("#recipeList").scrollTop; searchLimit += 200; renderList(); $("#recipeList").scrollTop = top; return; }
+  const r = e.target.closest(".rec"); if (r) addNode(r.dataset.rid);
+});
+let searchTimer;
+$("#search").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { searchLimit = 200; renderList(); }, 90); });
+const saveSearch = () => { try { localStorage.setItem("gtp.search", JSON.stringify({ mode: searchMode })); } catch (_) {} };
+$("#searchMode").addEventListener("click", e => {
+  const b = e.target.closest("button[data-m]"); if (!b) return;
+  searchMode = b.dataset.m; searchLimit = 200; saveSearch(); syncSearchUi(); renderList(); $("#search").focus();
+});
+$("#machineFilter").addEventListener("change", e => { machineFilter = e.target.value; searchLimit = 200; saveSearch(); renderList(); });
+// drag the right edge of the recipe panel to make it wider or narrower
+(() => {
+  const root = document.documentElement;
+  try { const w = +localStorage.getItem("gtp.leftW"); if (w >= 220 && w <= 720) root.style.setProperty("--lw", w + "px"); } catch (_) {}
+  let dragging = false;
+  $("#leftResize").addEventListener("mousedown", e => { dragging = true; e.preventDefault(); document.body.style.cursor = "col-resize"; });
+  window.addEventListener("mousemove", e => { if (dragging) root.style.setProperty("--lw", Math.min(720, Math.max(220, e.clientX)) + "px"); });
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return; dragging = false; document.body.style.cursor = "";
+    try { localStorage.setItem("gtp.leftW", String(parseInt(getComputedStyle(root).getPropertyValue("--lw")) || 270)); } catch (_) {}
+  });
+})();
 $("#btnUnit").onclick = () => { S.unit = S.unit === 60 ? 1 : 60; $("#btnUnit").textContent = S.unit === 60 ? "per min" : "per sec"; update(); };
 $("#btnFit").onclick = fit;
 function fit() {

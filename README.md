@@ -36,7 +36,11 @@ Recipes and icon textures are taken from Minecraft, GregTech CEu Modern and the 
 respective authors. This project is an unofficial fan tool and is not affiliated with or endorsed by them.
 
 ## Use
-- Left: search recipes (by item, machine) and click to add a node.
+- Left: search recipes and click one to add a node. Pick **what** you search with the switch under the box:
+  **All** (item names and machine), **Makes** (recipes that produce the item), **Uses** (recipes that consume it) or
+  **Machine**. The dropdown limits results to one machine. Every row shows the whole recipe (outputs, then
+  `← inputs` with amounts, then machine and tier) with your search words highlighted; recipes where your item is the main
+  product come first. Long lists load 200 at a time (**Show more**). Drag the panel's right edge to make it wider.
 - Click an **output dot**, then an **input dot** of the same item to wire (Esc cancels).
 - Node **Manual** = you set the machine count. **Auto** = machines are derived from a target rate and/or downstream demand.
 - **Cards fit their text:** every node card sizes itself to its content (title, item names and rates, target / coil
