@@ -25,6 +25,9 @@ window. Keep `GTPlanner.exe` inside this folder: it serves the files next to it.
 Alternatives: double-click `index.html` (no icons in exported PNGs, and import the dumps by hand the first time), or run
 `serve.ps1` and open http://127.0.0.1:8099/ in a browser.
 
+## Versions
+What changed in each version: [CHANGELOG.md](CHANGELOG.md), also shown in the app under **What's new** (`changelog.html`).
+
 ## Making the data file
 `data/dataset.json` (about 10 MB) is built from the in-game exports in `dumps/` with
 `powershell -ExecutionPolicy Bypass -File tools\make_dataset.ps1`; the icons come from `tools\build_icons.ps1`
@@ -56,6 +59,18 @@ respective authors. This project is an unofficial fan tool and is not affiliated
   per-page table (click a row to open that page). "Match surplus against shortfalls between pages" (on by default) lets
   one page's surplus cover another page's raw input for the same item, and lists what was supplied between pages.
   Pages are independent flowsheets, so this is a bookkeeping view, not a wire between pages.
+- **Programmed circuits, molds, lenses:** recipes show what must sit in the machine without being used up: an orange
+  **Needs** row on the card (for example *Circuit 2*, *Rotor Extruder Mold*), a tag in the recipe list and recipe switcher,
+  searchable with **Uses** (`circuit 2`, `mold`), and a **Circuits & molds** total in the right panel (one set per machine).
+- **Animation** (header switch **Animation: On/Off**; untick **Show pulses** to keep only the numbers): runs the page's flowsheet from an **empty factory** and shows items as small pulses on the
+  wires (a number on a pulse = how many items it carries), a progress bar and busy count on each card ("waiting for input"
+  in amber), and for each end product: the time until the **first one** comes out, how many were made, the measured rate
+  and the planned rate. Speed 1x to 600x, pause, restart. Timing comes from the recipe durations after overclocking.
+  - Machines work at the planned rate by default, so results match the cards. **Machines at full speed** lets every
+    whole (rounded-up) machine run whenever it has input, to see what they could really make.
+  - Simplifications: pipes and item transport take no time, inputs with no wire never run out, output buffers never fill,
+    chance outputs add up fractionally, and a compound module is one black box. Expand a module for exact timing.
+  - Off by default, so the planner stays light. Editing the board restarts the animation.
 - **Sticky notes** (`+ Note`): drag by the top bar, resize from the corner, click the dot to change colour, type to edit.
 - **Group frames** (`+ Frame`): a labelled box. Nodes whose centre is inside it are "in" the group: dragging the frame
   by its title bar moves them too, and its title bar shows the group's node count, machine count and power.

@@ -152,6 +152,16 @@ foreach ($id in $ids) {
 }
 "direct icons: $($direct.Count) of $($ids.Count) ids ($machines flattened machine icons)"
 
+# programmed circuits are not ordinary item ids in the dump (they carry a number): one icon per setting
+$circuits = 0
+foreach ($n in 0..32) {
+  # follow each setting's model (the texture number does not always match the setting, e.g. setting 0)
+  $t = Resolve-Textures "gtceu:item/programmed_circuit/$n"
+  $layers = @(); foreach ($k in 'layer0', 'layer1', 'layer2') { if ($t[$k]) { $r = Copy-Texture $t[$k]; if ($r) { $layers += $r } } }
+  if ($layers.Count) { $direct["gtceu:programmed_circuit_$n"] = $layers; $circuits++ }
+}
+"programmed circuit icons: $circuits"
+
 # ---- 5. write the index ---------------------------------------------------
 $obj = [ordered]@{ materials = $materials; ms = $ms; direct = $direct }
 $json = $obj | ConvertTo-Json -Depth 6 -Compress

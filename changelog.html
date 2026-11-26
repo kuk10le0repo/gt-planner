@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GT Planner: What's new</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { height: auto; }
+  body { padding: 24px 16px 48px; }
+  .log { max-width: 760px; margin: 0 auto; }
+  .log h1 { font-size: 22px; margin: 0 0 4px; }
+  .log .back { color: var(--acc); text-decoration: none; display: inline-block; margin-bottom: 16px; }
+  .ver { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px 18px 14px; margin-top: 16px; }
+  .ver h2 { font-size: 17px; margin: 12px 0 4px; color: var(--acc); }
+  .ver h3 { margin: 14px 0 4px; }
+  .ver ul { margin: 4px 0; padding-left: 20px; }
+  .ver li { margin: 5px 0; line-height: 1.45; }
+  .ver code { background: var(--panel2); border-radius: 4px; padding: 0 5px; }
+</style>
+</head>
+<body>
+<div class="log">
+  <a class="back" href="index.html">&larr; Back to the planner</a>
+  <div id="content" class="muted">Loading...</div>
+</div>
+<script>
+// Renders CHANGELOG.md (the single place version notes are written). Only the simple Markdown that file uses.
+(async () => {
+  const box = document.getElementById("content");
+  const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const inline = s => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  try {
+    const r = await fetch("CHANGELOG.md", { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    let html = "", list = false, section = false;
+    const endList = () => { if (list) { html += "</ul>"; list = false; } };
+    (await r.text()).split(/\r?\n/).forEach(line => {
+      if (line.startsWith("- ")) { if (!list) { html += "<ul>"; list = true; } html += "<li>" + inline(line.slice(2)) + "</li>"; return; }
+      endList();
+      if (line.startsWith("### ")) html += "<h3>" + inline(line.slice(4)) + "</h3>";
+      else if (line.startsWith("## ")) { html += (section ? "</section>" : "") + '<section class="ver"><h2>' + inline(line.slice(3)) + "</h2>"; section = true; }
+      else if (line.startsWith("# ")) html += "<h1>" + inline(line.slice(2)) + "</h1>";
+      else if (line.trim()) html += "<p>" + inline(line) + "</p>";
+    });
+    endList();
+    box.className = ""; box.innerHTML = html + (section ? "</section>" : "");
+  } catch (e) {
+    box.innerHTML = 'The version notes could not be loaded here (a page opened straight from disk may not read other files). ' +
+      'Open the app with GT Planner, or read <a class="back" href="https://github.com/kuk10le0repo/gt-planner/blob/main/CHANGELOG.md">CHANGELOG.md on GitHub</a>.';
+  }
+})();
+</script>
+</body>
+</html>

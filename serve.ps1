@@ -5,7 +5,7 @@ $l = New-Object System.Net.HttpListener
 $l.Prefixes.Add("http://127.0.0.1:$Port/")
 $l.Start()
 Write-Host "Serving $root at http://127.0.0.1:$Port/"
-$mime = @{ ".html"="text/html; charset=utf-8"; ".js"="text/javascript; charset=utf-8"; ".css"="text/css; charset=utf-8"; ".json"="application/json"; ".png"="image/png" }
+$mime = @{ ".html"="text/html; charset=utf-8"; ".js"="text/javascript; charset=utf-8"; ".css"="text/css; charset=utf-8"; ".json"="application/json"; ".png"="image/png"; ".md"="text/plain; charset=utf-8" }
 while ($l.IsListening) {
   $c = $l.GetContext()
   $p = [Uri]::UnescapeDataString($c.Request.Url.AbsolutePath).TrimStart("/")

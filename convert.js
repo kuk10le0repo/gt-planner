@@ -37,13 +37,29 @@ window.convertKubeDump = function (raw) {
   const items = {}, machines = {}, recipes = [];
   let skipped = 0;
 
-  const parse = (sec, isOut) => {
+  // Inputs with zero chance are needed in the machine but never used up: programmed circuits, molds, lenses, catalysts.
+  const addNeeded = (nc, c, kind) => {
+    let id, entry;
+    if (c.type === "gtceu:circuit") {
+      const n = Number(c.configuration) || 0;
+      id = "gtceu:programmed_circuit_" + n; entry = { item: id, amount: 1, circuit: n };
+      if (!items[id]) items[id] = { name: "Programmed Circuit " + n };
+    } else {
+      id = resolve(rawId(c)); if (!id) return;
+      entry = { item: id, amount: kind === "fluid" ? (c.amount != null ? c.amount : 1000) : (c.count != null ? c.count : 1) };
+      if (!items[id]) items[id] = { name: titleCase(id.replace(/^tag:/, "")) };
+      if (kind === "fluid") items[id].fluid = true;
+    }
+    if (!nc.some(q => q.item === id)) nc.push(entry);
+  };
+
+  const parse = (sec, isOut, nc) => {
     const list = [];
     if (!sec) return list;
     ["item", "fluid"].forEach(kind => (sec[kind] || []).forEach(e => {
       const c = e.content; if (c == null) return;
       const max = e.maxChance || 10000, chance = (e.chance != null ? e.chance : max) / max;
-      if (!isOut && chance <= 0) return;                       // non-consumed (circuits, molds...)
+      if (!isOut && chance <= 0) { if (nc) addNeeded(nc, c, kind); return; }
       const id = resolve(rawId(c)); if (!id) return;
       const amount = kind === "fluid" ? (c.amount != null ? c.amount : 1000) : (c.count != null ? c.count : (c.amount != null ? c.amount : 1));
       if (!(amount > 0)) return;
@@ -63,11 +79,14 @@ window.convertKubeDump = function (raw) {
     const eu = j.tickInputs && j.tickInputs.eu && j.tickInputs.eu[0];
     const eut = eu && eu.content != null ? Math.abs(Number(eu.content)) : null;
     if (!eut || !j.duration) { skipped++; return; }            // generators / non-power recipes
-    const inputs = parse(j.inputs, false), outputs = parse(j.outputs, true);
+    const nc = [];
+    const inputs = parse(j.inputs, false, nc), outputs = parse(j.outputs, true);
     if (!outputs.length) { skipped++; return; }
     const machine = String(r.type).replace("gtceu:", "");
     if (!machines[machine]) machines[machine] = { name: titleCase(machine) };
-    recipes.push({ id: r.id, machine, inputs, outputs, duration: Number(j.duration), eut });
+    const rec = { id: r.id, machine, inputs, outputs, duration: Number(j.duration), eut };
+    if (nc.length) rec.nc = nc;                                 // needed, not consumed
+    recipes.push(rec);
   });
 
   // Fluid tags (e.g. "forge:oxygen") cannot be resolved inside the game like item tags can.
@@ -91,7 +110,7 @@ window.convertKubeDump = function (raw) {
       });
       return out;
     };
-    recipes.forEach(r => { r.inputs = fix(r.inputs); r.outputs = fix(r.outputs); });
+    recipes.forEach(r => { r.inputs = fix(r.inputs); r.outputs = fix(r.outputs); if (r.nc) r.nc = fix(r.nc); });
     Object.keys(remap).forEach(id => {
       delete items[id];
       const t = remap[id]; if (!items[t]) items[t] = { name: titleCase(t) };

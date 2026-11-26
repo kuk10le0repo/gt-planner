@@ -113,6 +113,9 @@ function setData(d) {
 const itemName = id => (DATA.items && DATA.items[id] && DATA.items[id].name) || id;
 const isFluid = id => !!(DATA.items && DATA.items[id] && DATA.items[id].fluid);
 const machineName = id => (DATA.machines && DATA.machines[id] && DATA.machines[id].name) || id;
+// r.nc = items a recipe needs in the machine but does not use up (programmed circuit, mold, lens, catalyst)
+const ncOf = r => r.nc || [];
+const ncName = e => e.circuit != null ? "Circuit " + e.circuit : (e.amount > 1 ? e.amount + "× " : "") + itemName(e.item);
 const recipeName = r => r.outputs.map(o => itemName(o.item)).join(" + ");
 
 // ---------- icons ----------
@@ -312,7 +315,7 @@ function compute(nodes = S.nodes, allWires = S.wires) {
   // summary
   // mlist keeps one fractional machine count PER NODE (flattened through modules, scaled by their copies);
   // whole machines are then rounded up per node, because two nodes can't share a machine.
-  const mlist = [], raw = {}, net = {}, blocks = {}, hatches = {};
+  const mlist = [], raw = {}, net = {}, blocks = {}, hatches = {}, tools = {};
   let avg = 0, peak = 0, warn = 0;
   Object.values(N).forEach(x => {
     x.r.inputs.forEach((inp, k) => { const d = x.need[k] - x.supplied[k]; if (d > 1e-9) raw[inp.item] = (raw[inp.item] || 0) + d; });
@@ -322,12 +325,14 @@ function compute(nodes = S.nodes, allWires = S.wires) {
       c.mlist.forEach(e => mlist.push({ key: e.key, m: e.m * k }));
       Object.entries(c.blocks).forEach(([nm, v]) => { blocks[nm] = (blocks[nm] || 0) + Math.ceil(v * k - 1e-9); });
       Object.entries(c.hatches).forEach(([nm, v]) => { hatches[nm] = (hatches[nm] || 0) + Math.ceil(v * k - 1e-9); });
+      Object.entries(c.tools).forEach(([id, v]) => { tools[id] = (tools[id] || 0) + Math.ceil(v * k - 1e-9); });
       avg += k * c.avg; peak += x.mc * c.peak;
       return;
     }
     const key = x.r.machine + "|" + x.tier;
     mlist.push({ key, m: x.m });
     avg += x.m * x.eut; peak += x.mc * x.eut;
+    if (x.mc > 0) ncOf(x.r).forEach(e => { tools[e.item] = (tools[e.item] || 0) + e.amount * x.mc; });   // one set per machine
     const mb = mbFor(x.n);
     if (mb && x.mc > 0) {
       Object.entries(mb.blocks || {}).forEach(([bid, cnt]) => {
@@ -348,7 +353,7 @@ function compute(nodes = S.nodes, allWires = S.wires) {
   wires.forEach(w => { if (w.cycle) warn++; });
   const machines = {};
   mlist.forEach(e => { machines[e.key] = (machines[e.key] || 0) + Math.ceil(e.m - 1e-9); });
-  return { N, wires, machines, mlist, raw, net, blocks, hatches, avg, peak, warn };
+  return { N, wires, machines, mlist, raw, net, blocks, hatches, tools, avg, peak, warn };
 }
 
 // ---------- node ops ----------
@@ -467,7 +472,11 @@ const SEARCH_HINT = { all: "Search an item or machine...", out: "Recipes that MA
 const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function srch(r) {
   let s = SRCH.get(r.id);
-  if (!s) { s = { o: r.outputs.map(x => itemName(x.item).toLowerCase()), i: r.inputs.map(x => itemName(x.item).toLowerCase()), m: machineName(r.machine).toLowerCase() }; SRCH.set(r.id, s); }
+  if (!s) {
+    s = { o: r.outputs.map(x => itemName(x.item).toLowerCase()), i: r.inputs.concat(ncOf(r)).map(x => itemName(x.item).toLowerCase()), m: machineName(r.machine).toLowerCase() };
+    ncOf(r).forEach(e => { if (e.circuit != null) s.i.push("circuit " + e.circuit); });     // search "circuit 2" in Uses / All
+    SRCH.set(r.id, s);
+  }
   return s;
 }
 function populateMachineFilter() {                         // one option per machine type, with its recipe count
@@ -527,7 +536,7 @@ function renderList() {
     `<div class="rec" data-rid="${esc(r.id)}">${iconHtml(r.outputs[0].item)}<div class="t">` +
     `<div class="o">${r.outputs.map(o => part(o, hOut)).join(" + ")}</div>` +
     `<div class="i">← ${r.inputs.length ? r.inputs.map(i => part(i, hIn)).join(" + ") : "(no input)"}</div>` +
-    `<div class="m">${hl(machineName(r.machine), hMach)} · ${TIERS[baseTier(r)]}</div></div><button title="Add to the board">+</button></div>`).join("")
+    `<div class="m">${hl(machineName(r.machine), hMach)} · ${TIERS[baseTier(r)]}${ncOf(r).map(e => ` · <span class="needtag" title="Needed in the machine, not used up">${hl(ncName(e), hIn)}</span>`).join("")}</div></div><button title="Add to the board">+</button></div>`).join("")
     + (total > shown.length ? `<button id="moreBtn" class="more">Show ${Math.min(200, total - shown.length)} more of ${(total - shown.length).toLocaleString()} remaining</button>` : "")
     || `<div class="muted" style="padding:10px">No recipes match. Try another search mode.</div>`;
   $("#searchInfo").textContent = !q && !machineFilter ? `${total.toLocaleString()} recipes · type to search` : `${total.toLocaleString()} matching recipe${total === 1 ? "" : "s"}${total > shown.length ? ", showing the first " + shown.length : ""}`;
@@ -567,7 +576,8 @@ function nodeLay(n) {                              // {w, lw, rw}: card width an
   }
   const row1 = mod ? 8 + 140 + 4 + 84 + 10 : 262;
   const stats = 18 + tw(statsText(n, x), "11px");
-  const w = Math.ceil(Math.min(640, Math.max(NW, head, lw + rw, row2, row1, stats)));
+  const needs = ncOf(r).length ? ncOf(r).reduce((a, e) => a + 18 + 5 + tw(ncName(e), "11px") + 16, 10 + tw("Needs", "11px") + 16) : 0;
+  const w = Math.ceil(Math.min(640, Math.max(NW, head, lw + rw, row2, row1, stats, needs)));
   let L = lw + rw;
   if (w >= L) { const extra = w - L; lw += extra / 2; } else { lw = lw * w / L; }          // spread spare width / squeeze when capped
   lw = Math.floor(lw);
@@ -578,7 +588,8 @@ function nodeHtml(n) {
   const x = CALC.N[n.id];
   if (!x) return `<div class="node broken" data-id="${n.id}" style="left:${n.x}px;top:${n.y}px"><div class="nh" data-drag><span class="nm">Missing recipe: ${esc(n.recipeId)}</span><span class="x" data-act="del">✕</span></div><div class="ns">Not in the loaded dataset.</div></div>`;
   const r = x.r, rows = Math.max(r.inputs.length, r.outputs.length), L = nodeLay(n);
-  const h = ROWS_TOP + rows * ROW_H + 6;
+  const h = nodeHeight(r);
+  const needRow = ncOf(r).length ? `<div class="needrow" style="top:${ROWS_TOP + rows * ROW_H}px" title="Put these in the machine. They are not used up."><span>Needs</span>${ncOf(r).map(e => `<span class="need">${iconHtml(e.item)}${esc(ncName(e))}</span>`).join("")}</div>` : "";
   const tierOpts = TIERS.map((t, i) => i >= x.rt ? `<option value="${i}"${i === x.tier ? " selected" : ""}>${t}</option>` : "").join("");
   const mbSel = mbFor(n);
   const previewCoil = mbSel && Object.keys(mbSel.blocks || {}).find(isCoil);
@@ -618,7 +629,7 @@ function nodeHtml(n) {
     <div class="nc"><select data-f="tier" title="Machine tier">${tierOpts}</select><select data-f="mode"><option value="manual"${n.mode === "manual" ? " selected" : ""}>Manual</option><option value="auto"${n.mode === "auto" ? " selected" : ""}>Auto</option></select><label title="Perfect overclock (÷4 time)"><input type="checkbox" data-f="perfect"${n.perfect ? " checked" : ""}> perfect OC</label></div>
     <div class="nc">${row2}</div>
     <div class="ns"><b>${fmt(x.m)}</b> machines → ${x.mc} (${util}%) · ${fmt(x.eut)} EU/t each · ${fmt(x.dur / 20)}s</div>
-    ${rowsHtml}${ports}</div>`;
+    ${rowsHtml}${needRow}${ports}</div>`;
 }
 
 function renderNodes() {
@@ -668,11 +679,11 @@ try { totalsMode = localStorage.getItem("gtp.totals") === "project" ? "project" 
 const addInto = (dst, src) => { Object.entries(src).forEach(([k, v]) => { dst[k] = (dst[k] || 0) + v; }); };
 function projectTotals() {
   syncPage();
-  const T = { avg: 0, peak: 0, nodes: 0, wires: 0, warn: 0, machines: {}, raw: {}, net: {}, blocks: {}, hatches: {}, supplied: {}, pages: [] };
+  const T = { avg: 0, peak: 0, nodes: 0, wires: 0, warn: 0, machines: {}, raw: {}, net: {}, blocks: {}, hatches: {}, tools: {}, supplied: {}, pages: [] };
   S.pages.forEach((p, i) => {
     const c = i === S.cur ? CALC : compute(p.nodes, p.wires);
     T.avg += c.avg; T.peak += c.peak; T.nodes += p.nodes.length; T.wires += p.wires.length; T.warn += c.warn;
-    addInto(T.machines, c.machines); addInto(T.raw, c.raw); addInto(T.net, c.net); addInto(T.blocks, c.blocks); addInto(T.hatches, c.hatches);
+    addInto(T.machines, c.machines); addInto(T.raw, c.raw); addInto(T.net, c.net); addInto(T.blocks, c.blocks); addInto(T.hatches, c.hatches); addInto(T.tools, c.tools);
     T.pages.push({ name: p.name, nodes: p.nodes.length, machines: Object.values(c.machines).reduce((a, b) => a + b, 0), avg: c.avg });
   });
   if (netAcross) {                                  // surplus made on one page covers a shortfall on another
@@ -704,7 +715,7 @@ function renderSummary() {
     const alts = n ? recipeAlternatives(n) : [];
     if (alts.length > 1) {
       selHtml += `<h3>Selected node: recipe</h3><select data-sf="recipe" data-id="${n.id}" style="width:100%">${alts.map(r =>
-        `<option value="${esc(r.id)}"${r.id === x.r.id ? " selected" : ""}>${esc(machineName(r.machine))} ${TIERS[baseTier(r)]}: ${esc(r.inputs.map(i => itemName(i.item)).join(" + ") || "(no input)")}</option>`).join("")}</select>`;
+        `<option value="${esc(r.id)}"${r.id === x.r.id ? " selected" : ""}>${esc(machineName(r.machine))} ${TIERS[baseTier(r)]}: ${esc((r.inputs.map(i => itemName(i.item)).join(" + ") || "(no input)") + ncOf(r).map(e => " [" + ncName(e) + "]").join(""))}</option>`).join("")}</select>`;
     }
     const l = x && DATA._mbByType && DATA._mbByType[x.r.machine];
     if (l && l.length) {
@@ -724,6 +735,8 @@ function renderSummary() {
     ${proj && Object.keys(c.supplied).length ? `<h3>Supplied between pages</h3>${list(c.supplied, true)}` : ""}
     <h3>Blocks (multiblocks)</h3>${list(c.blocks)}
     <h3>Hatches / buses</h3>${list(c.hatches)}
+    <h3 title="One set per machine. Placed in the machine, never used up.">Circuits &amp; molds (not used up)</h3>${Object.entries(c.tools).sort((a, b) => itemName(a[0]).localeCompare(itemName(b[0]), undefined, { numeric: true })).map(([id, v]) =>
+      `<div class="li">${iconHtml(id)}<span class="n">${esc(itemName(id))}</span><span class="v">×${fmt(v)}</span></div>`).join("") || `<div class="muted">—</div>`}
     <div class="muted" style="margin-top:14px">Data is approximate sample data unless you load your own export.</div>`;
   hydrateIcons($("#summary"));
 }
@@ -789,7 +802,7 @@ $("#frames").addEventListener("change", e => {
 function update(skipNodes) {
   CALC = compute();
   if (!skipNodes) { renderNodes(); renderDecor(); }
-  drawWires(); renderSummary(); applyView(); renderTabs(); save(); record();
+  drawWires(); renderSummary(); applyView(); renderTabs(); save(); record(); simSync();
 }
 function applyView() { const v = S.view; $("#world").style.transform = `translate(${v.x}px,${v.y}px) scale(${v.z})`; }
 
@@ -1027,11 +1040,15 @@ async function loadBundled(msg) {
     return true;
   } catch (_) { return false; }
 }
-async function checkDataUpdate(storedVersion) {
+// Stored data from a published build (it has a version) is replaced when a newer one is published. Data imported before
+// versions existed from this same dump (same recipe count, "KubeJS dump" name) is upgraded too, e.g. to gain circuits.
+// Anything else the user imported by hand is left alone.
+async function checkDataUpdate(stored) {
   try {
     const r = await fetch("data/version.json", { cache: "no-store" }); if (!r.ok) return;
     const v = await r.json();
-    if (v.version && v.version !== storedVersion && await loadBundled("A newer recipe dataset was published: updating...")) toast("Recipe data updated to the latest version.");
+    const stale = stored.version ? v.version !== stored.version : /^KubeJS dump/.test(stored.name || "") && v.recipes === stored.recipes.length;
+    if (v.version && stale && await loadBundled("A newer recipe dataset is available: updating...")) toast("Recipe data updated to the latest version.");
   } catch (_) { /* offline or no version file: keep what we have */ }
 }
 // First run (served over http, e.g. by GitHub Pages or GTPlanner.exe): load the bundled data, else import dumps/ by hand-free fallback.
@@ -1134,7 +1151,7 @@ function abPick(item, costs, path) {
   }
   return best;
 }
-const nodeHeight = r => ROWS_TOP + Math.max(r.inputs.length, r.outputs.length) * ROW_H + 6;
+const nodeHeight = r => ROWS_TOP + (Math.max(r.inputs.length, r.outputs.length) + (ncOf(r).length ? 1 : 0)) * ROW_H + 6;
 
 // rate is items/s. extend=true: wire the new chain's output to every existing node that is short of this item.
 function buildChain(item, rate, o, extend) {
@@ -1340,13 +1357,14 @@ async function renderBoard(opts = {}) {
 
   // totals shown in the footer
   const mach = Object.entries(c.machines).filter(([, v]) => v > 0).map(([k, v]) => { const [m, t] = k.split("|"); return [TIERS[t] + " " + machineName(m), "×" + v, null]; });
-  const lists = [["Machines", mach], ["Raw inputs", Object.entries(c.raw).sort((a, b) => b[1] - a[1]).map(([k, v]) => [itemName(k), rate(v, k), k])],
+  Object.entries(c.tools).forEach(([id, v]) => mach.push([itemName(id), "×" + fmt(v), id]));   // circuits & molds, one set per machine
+  const lists = [["Machines & circuits", mach], ["Raw inputs", Object.entries(c.raw).sort((a, b) => b[1] - a[1]).map(([k, v]) => [itemName(k), rate(v, k), k])],
     ["Net products / surplus", Object.entries(c.net).sort((a, b) => b[1] - a[1]).map(([k, v]) => [itemName(k), rate(v, k), k])]];
   const CAP = 14, FH = summary ? 40 + Math.min(CAP + 1, Math.max(...lists.map(l => l[1].length), 1)) * 20 + 14 : 0;
 
   // icons: load every one we are going to draw
   const ids = new Set();
-  S.nodes.forEach(n => { const x = c.N[n.id]; if (x) { x.r.inputs.forEach(i => ids.add(i.item)); x.r.outputs.forEach(o => ids.add(o.item)); } });
+  S.nodes.forEach(n => { const x = c.N[n.id]; if (x) { x.r.inputs.forEach(i => ids.add(i.item)); x.r.outputs.forEach(o => ids.add(o.item)); ncOf(x.r).forEach(e => ids.add(e.item)); } });
   lists.forEach(l => l[1].forEach(e => { if (e[2]) ids.add(e[2]); }));
   const icons = {};
   if (useIcons && window.ICON_INDEX) await Promise.all([...ids].map(async id => { icons[id] = await buildIcon(id); }));
@@ -1439,8 +1457,14 @@ async function renderBoard(opts = {}) {
         ctx.font = "11px system-ui,sans-serif"; ctx.fillStyle = C.muted; ctx.fillText(rt, n.x + CW - 33 - nmw - 8 - rw, mid + 4);
       }
     }
+    if (ncOf(r).length) {                        // circuit / mold row (needed, not used up)
+      const top = n.y + ROWS_TOP + rows * ROW_H; ctx.fillStyle = "#ffb4541f"; ctx.fillRect(n.x + 1, top + 1, CW - 2, ROW_H - 2);
+      ctx.font = "11px system-ui,sans-serif"; ctx.fillStyle = "#ffb454"; ctx.fillText("Needs", n.x + 10, top + 16);
+      let tx = n.x + 20 + ctx.measureText("Needs").width;
+      ncOf(r).forEach(e => { drawIconPng(ctx, e.item, tx, top + 3, 18, icons); tx += 22; ctx.font = "11px system-ui,sans-serif"; ctx.fillStyle = C.text; const s = ncName(e); ctx.fillText(s, tx, top + 16); tx += ctx.measureText(s).width + 12; });
+    }
     // ports
-    const port = (px, py) => { ctx.beginPath(); ctx.arc(px, py, 6, 0, 7); ctx.fillStyle = "#6c7a94"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = C.panel; ctx.stroke(); };
+    const port =(px, py) => { ctx.beginPath(); ctx.arc(px, py, 6, 0, 7); ctx.fillStyle = "#6c7a94"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = C.panel; ctx.stroke(); };
     r.inputs.forEach((_, i) => port(n.x, n.y + ROWS_TOP + i * ROW_H + ROW_H / 2));
     r.outputs.forEach((_, i) => port(n.x + CW, n.y + ROWS_TOP + i * ROW_H + ROW_H / 2));
   });
@@ -1499,6 +1523,186 @@ async function exportPng(copy) {
 }
 $("#btnPng").onclick = e => exportPng(e.shiftKey);
 
+// ---------- flow animation ("Animate") ----------
+// sim.js runs the factory from empty; here we draw it: a small pulse per item (batched when there are too many to show),
+// a progress bar on every working card, and how long the first finished product takes.
+let SIM = null;
+const PULSE_MS = 800, PULSE_GAP_MS = 130, PULSE_MAX = 700;
+function longestPath(c) {                          // longest chain of craft durations (s): the quickest conceivable single pass
+  const memo = {};
+  const go = (id, seen) => {
+    if (id in memo) return memo[id];
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    const x = c.N[id]; let up = 0;
+    c.wires.forEach(w => { if (!w.cycle && w.to === +id && c.N[w.from]) up = Math.max(up, go(w.from, seen)); });
+    seen.delete(id);
+    return (memo[id] = up + (x.mod ? longestPath(x.mod) : x.dur / 20));
+  };
+  return Object.keys(c.N).reduce((best, id) => Math.max(best, go(+id, new Set())), 0);
+}
+function simSpec() {
+  const c = CALC;
+  const wires = c.wires.filter(w => !w.cycle && w.flow > 1e-12 && c.N[w.from].prod[w.fromIdx] > 0)
+    .map(w => ({ id: w.id, from: w.from, fromIdx: w.fromIdx, to: w.to, toIdx: w.toIdx, share: w.flow / c.N[w.from].prod[w.fromIdx] }));
+  const nodes = Object.values(c.N).map(x => ({
+    id: x.n.id,
+    dur: x.mod ? longestPath(x.mod) : x.dur / 20,          // a module is one black box taking as long as its longest inner chain
+    machines: x.mod ? 10000 : x.mc, rate: x.runs,
+    inputs: x.r.inputs.map((i, k) => ({ amount: i.amount, wired: wires.some(w => w.to === x.n.id && w.toIdx === k) })),
+    outputs: x.r.outputs.map(o => ({ amount: o.amount * (o.chance != null ? o.chance : 1) }))
+  }));
+  return { nodes, wires };
+}
+function simReset() {
+  const spec = simSpec();
+  SIM.key = JSON.stringify(spec); SIM.pulses = []; SIM.queue = new Map(); SIM.products = new Map(); SIM.icons = {}; SIM.lastStats = 0;
+  SIM.byWire = new Map(spec.wires.map(w => [w.id, w]));
+  SIM.minPath = longestPath(CALC);
+  Object.values(CALC.N).forEach(x => [...x.r.inputs, ...x.r.outputs].forEach(e => { if (!(e.item in SIM.icons)) { SIM.icons[e.item] = null; buildIcon(e.item).then(cv => { if (SIM) SIM.icons[e.item] = cv; }); } }));
+  // pulses wait in a queue per route until at least one whole item (or some fluid) has built up
+  const enqueue = (key, item, qty, route) => {
+    let q = SIM.queue.get(key);
+    if (!q) { q = { item, route, qty: 0, last: -1e9 }; SIM.queue.set(key, q); }
+    q.qty += qty;
+  };
+  SIM.engine = window.createFlowSim(spec, {
+    full: SIM.full,
+    on: {
+      deliver: (wid, qty) => { const w = SIM.byWire.get(wid); enqueue("w" + wid, CALC.N[w.from].r.outputs[w.fromIdx].item, qty, { kind: "wire", w }); },
+      start: (nid, k) => {                                   // raw materials entering from outside
+        const x = CALC.N[nid]; x.r.inputs.forEach((inp, i) => { if (!spec.wires.some(w => w.to === nid && w.toIdx === i)) enqueue("i" + nid + ":" + i, inp.item, inp.amount * k, { kind: "in", node: nid, idx: i }); });
+      },
+      product: (nid, j, qty, t) => {                         // finished product / surplus leaving the factory
+        const item = CALC.N[nid].r.outputs[j].item;
+        let p = SIM.products.get(item);
+        if (!p) { p = { total: 0, firstT: null, firstQty: 0, lastT: t }; SIM.products.set(item, p); }
+        p.total += qty; p.lastT = t;
+        if (p.firstT === null) { if (isFluid(item) || p.total >= 1 - 1e-6) { p.firstT = t; p.firstQty = p.total; } }   // "first" = first WHOLE item
+        else if (Math.abs(t - p.firstT) < 1e-9) p.firstQty += qty;
+        enqueue("o" + nid + ":" + j, item, qty, { kind: "out", node: nid, idx: j });
+      }
+    }
+  });
+  simStats();
+}
+function simStart() {
+  if (!S.nodes.some(n => CALC.N[n.id])) return toast("Add some recipes first, then animate them");
+  SIM = { speed: +$("#simSpeed").value, full: $("#simFull").checked, visual: $("#simVisual").checked, playing: true, wall: performance.now() };
+  $("#simbar").classList.remove("hidden"); $("#hint").classList.add("hidden"); simSwitch(true);
+  simReset(); simButtons();
+  SIM.raf = requestAnimationFrame(simFrame);
+}
+function simStop() {
+  if (!SIM) return;
+  cancelAnimationFrame(SIM.raf); SIM = null;
+  const cv = $("#simcv"), ctx = cv.getContext("2d"); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
+  $("#simbar").classList.add("hidden"); $("#hint").classList.remove("hidden"); simSwitch(false);
+}
+function simSwitch(on) {                            // the On/Off switch in the header
+  $("#simLabel").textContent = on ? "Animation: On" : "Animation: Off";
+  $("#btnSim").classList.toggle("on", on); $("#btnSim").setAttribute("aria-checked", String(on));
+}
+function simSync() { if (SIM && JSON.stringify(simSpec()) !== SIM.key) simReset(); }   // the plan changed: start over
+const simButtons = () => { $("#simPlay").textContent = SIM.playing ? "⏸ Pause" : "▶ Resume"; };
+const clockText = t => { const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60; return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + s.toFixed(1).padStart(4, "0"); };
+const secText = t => t < 90 ? fmt(t) + " s" : clockText(t);
+
+function simStats() {
+  $("#simClock").textContent = clockText(SIM.engine.t);
+  const want = Object.entries(CALC.net).sort((a, b) => b[1] - a[1]);
+  // products nobody downstream consumes, biggest planned rate first; the chain's end product comes first
+  const sinks = new Set(); Object.values(CALC.N).forEach(x => { if (!CALC.wires.some(w => !w.cycle && w.from === x.n.id)) x.r.outputs.forEach(o => sinks.add(o.item)); });
+  want.sort((a, b) => (sinks.has(b[0]) ? 1 : 0) - (sinks.has(a[0]) ? 1 : 0));
+  const rows = want.slice(0, 4).map(([item, planned]) => {
+    const q = SIM.products.get(item), p = q && q.firstT !== null ? q : null, span = p ? p.lastT - p.firstT : 0;
+    const measured = span > 1e-6 ? (p.total - p.firstQty) / span : null;
+    return `<div class="simrow">${iconHtml(item)}<span class="n">${esc(itemName(item))}</span>` +
+      (p ? `<span>first after <b>${secText(p.firstT)}</b></span><span>made <b>${fmt(isFluid(item) ? p.total : Math.floor(p.total + 1e-6))}${isFluid(item) ? " mB" : ""}</b></span><span>${measured == null ? "measuring..." : "now " + rate(measured, item)}</span>`
+        : `<span class="muted">not produced yet...</span>`) + `<span class="muted">plan ${rate(planned, item)}</span></div>`;
+  }).join("");
+  if (!Object.keys(CALC.N).length) { $("#simStats").innerHTML = `<div class="muted">Nothing to animate on this page.</div>`; return; }
+  $("#simStats").innerHTML = rows + `<div class="muted">Longest machine chain: ${secText(SIM.minPath)} · starts with an empty factory · a number on a pulse = how many items it carries${want.length > 4 ? " · +" + (want.length - 4) + " more outputs" : ""}</div>`;
+  hydrateIcons($("#simStats"));
+}
+
+function pulsePoint(p, u) {                       // where a pulse is, u = 0..1 along its route (world coordinates)
+  const r = p.route;
+  if (r.kind === "wire") {
+    const a = portPos(r.w.from, "out", r.w.fromIdx), b = portPos(r.w.to, "in", r.w.toIdx), dx = Math.max(40, Math.abs(b.x - a.x) / 2), v = 1 - u;
+    const c0 = v * v * v, c1 = 3 * v * v * u, c2 = 3 * v * u * u, c3 = u * u * u;
+    return { x: c0 * a.x + c1 * (a.x + dx) + c2 * (b.x - dx) + c3 * b.x, y: c0 * a.y + c1 * a.y + c2 * b.y + c3 * b.y };
+  }
+  const q = portPos(r.node, r.kind === "in" ? "in" : "out", r.idx);
+  return { x: r.kind === "in" ? q.x - 46 * (1 - u) : q.x + 56 * u, y: q.y };
+}
+function simFrame(now) {
+  if (!SIM) return;
+  const dt = Math.min(0.1, Math.max(0, (now - SIM.wall) / 1000)); SIM.wall = now;
+  if (SIM.playing) {
+    SIM.engine.advance(SIM.engine.t + dt * SIM.speed);
+    SIM.queue.forEach(q => {                                // turn queued items into visible pulses
+      if (!SIM.visual) { q.qty = 0; return; }               // visuals off: drop them (no burst when switched back on)
+      if (now - q.last < PULSE_GAP_MS || SIM.pulses.length >= PULSE_MAX) return;
+      const n = isFluid(q.item) ? q.qty : Math.floor(q.qty + 1e-6);
+      if (n < (isFluid(q.item) ? 1e-3 : 1)) return;
+      q.qty -= n; q.last = now;
+      SIM.pulses.push({ route: q.route, item: q.item, qty: n, age: 0 });
+    });
+    SIM.pulses.forEach(p => p.age += dt * 1000);
+    SIM.pulses = SIM.pulses.filter(p => p.age < PULSE_MS);
+  }
+  simDraw();
+  if (now - SIM.lastStats > 250) { SIM.lastStats = now; simStats(); }
+  SIM.raf = requestAnimationFrame(simFrame);
+}
+function simDraw() {
+  const cv = $("#simcv"), box = $("#canvas").getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  if (cv.width !== Math.round(box.width * d) || cv.height !== Math.round(box.height * d)) { cv.width = Math.round(box.width * d); cv.height = Math.round(box.height * d); }
+  const ctx = cv.getContext("2d"), v = S.view;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
+  if (!SIM.visual) return;
+  ctx.setTransform(d * v.z, 0, 0, d * v.z, d * v.x, d * v.y);
+  const t = SIM.engine.t;
+  S.nodes.forEach(n => {                                    // working cards: progress bar + busy machines
+    const x = CALC.N[n.id], m = x && SIM.engine.node(n.id); if (!m) return;
+    const w = nodeLay(n).w, y = n.y + nodeHeight(x.r), state = SIM.engine.state(n.id);
+    const col = state === "busy" ? "#4cc38a" : state === "starved" ? "#ffb454" : "#6c7a94";   // amber: between deliveries or held up
+    ctx.fillStyle = "#0008"; ctx.fillRect(n.x + 6, y - 5, w - 12, 4);
+    const b = m.batches[0];
+    if (b) { ctx.fillStyle = col; ctx.fillRect(n.x + 6, y - 5, (w - 12) * Math.min(1, Math.max(0, (t - b.start) / (b.end - b.start))), 4); }
+    const label = state === "starved" ? "waiting for input" : x.mod ? (state === "busy" ? "module working" : "module idle") : `${m.busy}/${m.machines} busy`;
+    ctx.font = "600 10px system-ui, sans-serif"; const lw = ctx.measureText(label).width + 12;
+    ctx.fillStyle = "#14161aee"; ctx.fillRect(n.x + w - lw - 4, y + 3, lw, 15);
+    ctx.fillStyle = col; ctx.textAlign = "left"; ctx.fillText(label, n.x + w - lw + 2, y + 14);
+  });
+  SIM.pulses.forEach(p => {
+    const u = p.age / PULSE_MS, q = pulsePoint(p, u), icon = SIM.icons[p.item];
+    ctx.globalAlpha = p.route.kind === "out" ? 1 - u * u : p.route.kind === "in" ? Math.min(1, u * 2) : 1;
+    ctx.beginPath(); ctx.arc(q.x, q.y, 9, 0, 7); ctx.fillStyle = "#0b0d10cc"; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = p.route.kind === "out" ? "#ffd166" : "#4da3ff"; ctx.stroke();
+    if (icon) { ctx.imageSmoothingEnabled = false; ctx.drawImage(icon, q.x - 6.5, q.y - 6.5, 13, 13); }
+    else { ctx.beginPath(); ctx.arc(q.x, q.y, 4.5, 0, 7); ctx.fillStyle = tileColor(p.item); ctx.fill(); }
+    if (p.qty > 1.0001 || isFluid(p.item)) {
+      const s = fmt(p.qty) + (isFluid(p.item) ? " mB" : "");
+      ctx.font = "700 10px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.lineWidth = 3; ctx.strokeStyle = "#0b0d10"; ctx.strokeText(s, q.x, q.y - 12); ctx.fillStyle = "#fff"; ctx.fillText(s, q.x, q.y - 12);
+    }
+    ctx.globalAlpha = 1;
+  });
+  ctx.textAlign = "left";
+}
+$("#btnSim").onclick = () => SIM ? simStop() : simStart();
+$("#simClose").onclick = simStop;
+$("#simPlay").onclick = () => { SIM.playing = !SIM.playing; simButtons(); };
+$("#simRestart").onclick = () => { SIM.playing = true; simReset(); simButtons(); };
+$("#simSpeed").onchange = e => { if (SIM) SIM.speed = +e.target.value; };
+$("#simFull").onchange = e => { if (SIM) { SIM.full = e.target.checked; simReset(); } };
+try { $("#simVisual").checked = localStorage.getItem("gtp.pulses") !== "0"; } catch (_) {}
+$("#simVisual").onchange = e => {
+  try { localStorage.setItem("gtp.pulses", e.target.checked ? "1" : "0"); } catch (_) {}
+  if (SIM) { SIM.visual = e.target.checked; SIM.pulses = []; simDraw(); }
+};
+["mousedown", "wheel"].forEach(ev => $("#simbar").addEventListener(ev, e => e.stopPropagation()));
+
 // ---------- demo ----------
 function demo() {
   if (!REC.mac_iron || !REC.ebf_steel) return toast("The demo needs the built-in sample data (it isn't loaded)");
@@ -1524,7 +1728,7 @@ $("#btnDemo").onclick = demo;
   $("#btnUnit").textContent = S.unit === 60 ? "per min" : "per sec";
   update();
   if (!stored && /^https?:/.test(location.protocol)) await autoImport();
-  else if (stored && d.version && /^https?:/.test(location.protocol)) checkDataUpdate(d.version);     // data from a published build: stay current
+  else if (stored && /^https?:/.test(location.protocol)) checkDataUpdate(d);                          // stay current with the bundled data
   if (!S.nodes.length && S.pages.length === 1 && REC.mac_iron) demo();
 })();
 })();

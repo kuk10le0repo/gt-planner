@@ -10,3 +10,10 @@ tools/GTPlanner.ico
 
 *.log
 Thumbs.db
+
+# Local test boards
+testrun/
+
+# Local notes and preview config for Claude (not published)
+CLAUDE.md
+.claude/

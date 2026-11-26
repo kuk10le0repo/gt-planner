@@ -10,8 +10,10 @@
 <body>
 <header>
   <b class="logo">GT Planner</b>
+  <a id="verLink" href="changelog.html" target="_blank" title="See what changed in each version">v1.2 &middot; What's new</a>
   <span id="dataName" class="muted"></span>
   <span class="spacer"></span>
+  <button id="btnSim" role="switch" aria-checked="false" title="Turn the flow animation on or off: watch items move through the machines and see how long the first product takes"><span class="sw"></span><span id="simLabel">Animation: Off</span></button>
   <button id="btnUnit" title="Toggle rate unit">per min</button>
   <button id="btnAuto" title="Build the whole production chain for an item automatically">&#9881; Auto-build</button>
   <button id="btnNote" title="Add a sticky note">+ Note</button>
@@ -52,6 +54,19 @@
       <div id="nodes"></div>
       <div id="notes"></div>
     </div>
+    <canvas id="simcv"></canvas>
+    <div id="simbar" class="hidden">
+      <div class="sbrow">
+        <button id="simPlay">&#9208; Pause</button>
+        <button id="simRestart" title="Start again from an empty factory">&#8634; Restart</button>
+        <label>Speed <select id="simSpeed"><option value="1">1&#215; real time</option><option value="5" selected>5&#215;</option><option value="20">20&#215;</option><option value="60">60&#215; (1 min per second)</option><option value="600">600&#215; (10 min per second)</option></select></label>
+        <label title="Turn off the moving pulses and progress bars; the clock and numbers keep running"><input type="checkbox" id="simVisual" checked> Show pulses</label>
+        <label title="Off: machines work at the planned rate, matching the cards. On: every whole machine runs whenever it has input."><input type="checkbox" id="simFull"> Machines at full speed</label>
+        <b id="simClock" title="Time inside the factory">0:00.0</b>
+        <button id="simClose" title="Stop the animation">&#10005;</button>
+      </div>
+      <div id="simStats"></div>
+    </div>
     <div id="hint">Drag background to pan, wheel to zoom. Click an output dot, then an input dot of the same item to wire. Del removes the selection.</div>
   </section>
   <aside id="right"><div id="summary"></div></aside>
@@ -81,6 +96,7 @@
 <script src="convert.js"></script>
 <script src="icons/index.js" onerror="console.info('no icons/index.js yet')"></script>
 <script src="icons/textures.js" onerror="console.info('no icons/textures.js: falling back to icons/tex/*.png')"></script>
+<script src="sim.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
