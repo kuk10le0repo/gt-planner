@@ -1,6 +1,6 @@
 # GT Planner: what changed in each version
 
-## v1.2 (not yet published)
+## v1.2 (2026-11-27)
 
 ### New
 - **Animation:** watch items move through the factory as small pulses on the wires, with a progress bar and busy count on every machine.
